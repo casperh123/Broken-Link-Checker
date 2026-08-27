@@ -1,5 +1,9 @@
+@using System.Text
+@using Radzen.Documents.Spreadsheet
 @using WebsiteAnalyzer.Core.Contracts.BrokenLink
 @using WebsiteAnalyzer.Web.Components.General.Toggles
+
+@inject IJSRuntime JSRuntime
 
 <RadzenCard Variant="Variant.Outlined">
     <RadzenRow JustifyContent="JustifyContent.SpaceBetween">
@@ -28,7 +32,7 @@
     
     @if (_open)
     {
-        <BrokenLinksStats BrokenLinks="Crawl.BrokenLinks"/>
+        <BrokenLinksStats BrokenLinks="Crawl.BrokenLinks" OnDownloadCSV="DownloadCVS"/>
     }
 </RadzenCard>
 
@@ -37,4 +41,54 @@
     public required BrokenLinkCrawlDTO Crawl { get; set; }
 
     private bool _open = false;
+
+    public async Task DownloadCVS()
+    {
+        ICollection<BrokenLinkDTO> brokenLinks = Crawl.BrokenLinks;
+        string websiteName = Crawl.Url;
+
+        Workbook workbook = InitializeWorkBook();
+        
+        using var ms = new MemoryStream();
+        workbook.SaveAsCsv(ms, BuildExportOptions());
+        ms.Position = 0;
+        using var streamRef = new DotNetStreamReference(ms);
+        await JSRuntime.InvokeVoidAsync("Radzen.downloadFile", $"${Uri.EscapeDataString(websiteName)}.csv", streamRef);
+    }
+
+    private Workbook InitializeWorkBook()
+    {
+        Workbook workbook = new Workbook();
+        Worksheet sheet = workbook.AddSheet("Broken Links", Crawl.BrokenLinks.Count + 1, 5);
+        
+        sheet.Cells[0, 0].SetValue("Target URL");
+        sheet.Cells[0, 1].SetValue("Referring Page");
+        sheet.Cells[0, 2].SetValue("Anchor Text");
+        sheet.Cells[0, 3].SetValue("HTML Line number");
+        sheet.Cells[0, 4].SetValue("HTTP Status Code");
+
+        foreach (var brokenLinkDto in Crawl.BrokenLinks.Select((link, index) =>
+                 {
+                     var offset = index + 1;
+
+                     sheet.Cells[offset, 0].SetValue(link.TargetPage);
+                     sheet.Cells[offset, 1].SetValue(link.ReferringPage);
+                     sheet.Cells[offset, 2].SetValue(link.AnchorText);
+                     sheet.Cells[offset, 3].SetValue(link.Line.ToString());
+                     sheet.Cells[offset, 4].SetValue(link.StatusCode.ToString());
+
+                     return link;
+                 }
+                 )
+        );
+        
+        return workbook;
+    }
+    
+    private CsvExportOptions BuildExportOptions() => new CsvExportOptions
+    {
+        Separator = ',',
+        Quoting = CsvQuoting.Minimal,
+        Encoding = Encoding.UTF8
+    };
 }
